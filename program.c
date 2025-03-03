@@ -19,10 +19,10 @@ int main(int argc, char *argv[])
     printf("Hello from process %d out of %d\n", world_rank, world_size);
 
 
-    int A[] = {2,4,6,8};
-    int B[] = {1,3,5,9};
+    int A[] = {2,4,6,8,10,12,14,16};
+    int B[] = {1,3,5,7,9,11,13,15};
 
-    int n = 4; //atoi(argv[1]); //size of each input array
+    int n = 8; //atoi(argv[1]); //size of each input array
     int r = n / (2 * world_size); //number of groups
     int k = (int)log(n) / log(2); //number of elements in each group
 
@@ -50,34 +50,39 @@ int main(int argc, char *argv[])
             //this becomes the split point for B for process i + 1
             split_points[i + 1] = binary_search(B, n, a_end);
         }
+
+        
+        for (int i = 0; i < world_size + 1; i++) {
+            printf("%d ", split_points[i]);
+        }
     }
-    for (int i = 0; i < world_size + 1; i++) {
-        printf("%d ", split_points[i]);
+    //broadcast split points to all processes
+    else if (world_rank != 0)
+    {
+        
     }
 
     MPI_Finalize();
     return 0;
 }
 
-//helper method for binary search
+//helper method for binary search, finds lower bound.
 int binary_search(int array[], int size, int target)
 {
     int left = 0;
-    int right = size - 1; //right = length of array - 1
+    int right = size; 
 
-    while (left <= right) 
+    while (left < right) 
     {
         int middle = left + (right - left) / 2; 
-        //target found
-        if (array[middle] == target) return middle;  
-        //search right half
-        else if (array[middle] < target) left = middle + 1;  
-        //search left half
-        else right = middle - 1; 
+
+        if (array[middle] < target) left = middle + 1;
+
+        else right = middle;
     }
 
     //target not found
-    return -1; 
+    return left; 
 } 
 
 /*/ ALGORITHM
