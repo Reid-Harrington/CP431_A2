@@ -3,10 +3,35 @@
 #include <stdlib.h>
 #include <math.h>
 
+
+
 int binary_search(int array[], int size, int target);
+
+
+void merge(int *A, int *B, int *C)
+{
+    //indexes for A B and C arrays
+    int i, j, k = 0;
+    while(i < n || j < n) //while there are still elements left in either A or B
+    {
+        //copy element from A
+        if (j >= n || (i < n && A[i] <= B[j])) // if no elements left in B, or if we still have elements in A and the current element is less than the current element in B
+        {
+            C[k++] = A[i++];
+        }
+        //copy element from B
+        else
+        {
+            C[k++] = B[j++];
+        }
+    }
+
+
+}
 
 int main(int argc, char *argv[]) 
 {
+    //step 1: Initiating MPI
     MPI_Init(&argc, &argv);
  
     int world_size, world_rank;
@@ -18,7 +43,7 @@ int main(int argc, char *argv[])
 
     printf("Hello from process %d out of %d\n", world_rank, world_size);
 
-
+    //Global variables
     int A[] = {2,4,6,8,10,12,14,16};
     int B[] = {1,3,5,7,9,11,13,15};
 
@@ -29,6 +54,7 @@ int main(int argc, char *argv[])
 
     int target = 3;
 
+    //step 2: split points
     int *split_points = NULL;
     //rank 0 processes the split points for B
     if(world_rank == 0)
@@ -59,8 +85,17 @@ int main(int argc, char *argv[])
     //broadcast split points to all processes
     else if (world_rank != 0)
     {
-        
+
     }
+
+    //step 3: local partitioning
+
+    //allocating memory for the C array, which holds our final merged result
+    int *C_part = malloc((a_size + b_size) * sizeof(int));
+    //step 4: merging
+    merge(&A[a_start], a_size, &B[b_start], b_size, C_part);
+
+    //step 5: gathering results
 
     MPI_Finalize();
     return 0;
