@@ -3,19 +3,23 @@
 #include <stdlib.h>
 #include <math.h>
 
+//global variables
+int *A; //A array
+int *B;//B array
+int n = 8; // size of each array
 
 
 int binary_search(int array[], int size, int target);
 
 
-void merge(int *A, int *B, int *C)
+void merge(int *A, int sizeA, int *B, int sizeB, int *C)
 {
     //indexes for A B and C arrays
-    int i, j, k = 0;
-    while(i < n || j < n) //while there are still elements left in either A or B
+    int i = 0, j = 0, k = 0;
+    while(i < sizeA || j < sizeB) //while there are still elements left in either A or B
     {
         //copy element from A
-        if (j >= n || (i < n && A[i] <= B[j])) // if no elements left in B, or if we still have elements in A and the current element is less than the current element in B
+        if (j >= sizeB || (i < sizeA && A[i] <= B[j])) // if no elements left in B, or if we still have elements in A and the current element is less than the current element in B
         {
             C[k++] = A[i++];
         }
@@ -40,14 +44,10 @@ int main(int argc, char *argv[])
 
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
-
-    printf("Hello from process %d out of %d\n", world_rank, world_size);
-
     //Global variables
-    int A[] = {2,4,6,8,10,12,14,16};
-    int B[] = {1,3,5,7,9,11,13,15};
+    A = (int[]) {2,4,6,8,10,12,14,16};
+    B = (int[]) {1,3,5,7,9,11,13,15};
 
-    int n = 8; //atoi(argv[1]); //size of each input array
     int r = n / (2 * world_size); //number of groups
     int k = (int)log(n) / log(2); //number of elements in each group
 
@@ -76,26 +76,67 @@ int main(int argc, char *argv[])
             //this becomes the split point for B for process i + 1
             split_points[i + 1] = binary_search(B, n, a_end);
         }
-
-        
-        for (int i = 0; i < world_size + 1; i++) {
-            printf("%d ", split_points[i]);
-        }
     }
     //broadcast split points to all processes
     else if (world_rank != 0)
     {
-
+        split_points = (int *)malloc((world_size + 1) * sizeof(int));
     }
+    MPI_Bcast(split_points, world_size + 1, MPI_INT, 0, MPI_COMM_WORLD);
 
     //step 3: local partitioning
+    //define a and b starting index, and its size
+    int a_start = world_rank * (n / world_size);
+    int size_A = (world_rank + 1) * (n / world_size) - a_start;
+
+    int b_start = split_points[world_rank];
+    int size_B = split_points[world_rank + 1] - b_start;
+
 
     //allocating memory for the C array, which holds our final merged result
-    int *C_part = malloc((a_size + b_size) * sizeof(int));
+    int *local_C = (int *) malloc((n * 2) * sizeof(int));
+    int size_C = size_A + size_B;
     //step 4: merging
-    merge(&A[a_start], a_size, &B[b_start], b_size, C_part);
+    merge(&A[a_start],size_A, &B[b_start], size_B, local_C);
 
-    //step 5: gathering results
+    //step 5: gathering results of locally merged arrays at process 0
+    int *C = NULL;
+    int *recv_counts = NULL;
+    int *displs = NULL;
+    //process 0 prepares to gather data
+    if (world_rank == 0) 
+    {
+        C = (int *)malloc(2 * n * sizeof(int));
+        recv_counts = (int *)malloc(world_size * sizeof(int));
+        displs = (int *)malloc(world_size * sizeof(int));
+    }
+    MPI_Gather(&size_C, 1, MPI_INT, recv_counts, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    
+    if (world_rank == 0) 
+    {
+        displs[0] = 0;
+        for (int i = 1; i < world_size; i++) 
+        {
+            displs[i] = displs[i - 1] + recv_counts[i - 1];
+        }
+    }
+    //gather all parts into C
+    MPI_Gatherv(local_C, size_C, MPI_INT, C, recv_counts, displs, MPI_INT, 0, MPI_COMM_WORLD);
+
+    
+    // Root prints the merged array
+    if (world_rank == 0) 
+    {
+        printf("Merged array: ");
+        for (int i = 0; i < 2 * n; i++) {
+            printf("%d ", C[i]);
+        }
+        printf("\n");
+        free(C);
+        free(recv_counts);
+        free(displs);
+    }
+
 
     MPI_Finalize();
     return 0;
@@ -131,5 +172,5 @@ int binary_search(int array[], int size, int target)
 
     local merge: each process extracts its portion of A and B, merges them sequentially, and stores the result in C_part.
 
-    results: rank 0 process gathers all C_part arrays using MPI_Gatherv to form the final merged array C.
+    results: rank 0 process gathers all local C arrays using MPI_Gatherv to form the final merged array C.
 /*/
