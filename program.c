@@ -2,15 +2,32 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
-
+#include <time.h>
 //global variables
 int *A; //A array
 int *B;//B array
-int n = 8; // size of each array
+int n = 10; // size of each array
 
 
 int binary_search(int array[], int size, int target);
 
+//function for q sort, requires const void * as parameters
+int compare(const void *a, const void *b) 
+{
+    return (*(int*)a - *(int*)b);
+}
+
+
+void random_array(int *a, int seed)
+{
+    srand(seed);
+    for (int i = 0; i < n; i++) 
+    {
+        a[i] = rand() % 200;
+    }
+
+    qsort(a, n, sizeof(int), compare);
+}
 
 void merge(int *A, int sizeA, int *B, int sizeB, int *C)
 {
@@ -44,38 +61,56 @@ int main(int argc, char *argv[])
 
     MPI_Comm_rank(MPI_COMM_WORLD, &world_rank);
 
-    //Global variables
-    A = (int[]) {2,4,6,8,10,12,14,16};
-    B = (int[]) {1,3,5,7,9,11,13,15};
+    //Allocate memory for our arrays
+    A = (int *)malloc(n * sizeof(int));
+    B = (int *)malloc(n * sizeof(int));
+    if(world_rank == 0)
+    {
+        int seedA = time(NULL);
+        int seedB = seedA + 17; 
+        //generate random numbers for arrays
+        random_array(A, seedA);
+        random_array(B, seedB);
+        printf("A array:\n");
+        for(int i = 0; i < n; i++)
+        {
+            printf("%d ", A[i]);
+        }
+        printf("\n B array:\n");
+        for(int i = 0; i < n; i++)
+        {
+            printf("%d ", B[i]);
+        }
+    }
+    MPI_Bcast(A, n, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(B, n, MPI_INT, 0, MPI_COMM_WORLD);
 
-    int r = n / (2 * world_size); //number of groups
-    int k = (int)log(n) / log(2); //number of elements in each group
+    int base = n / world_size; // number of elements each process gets
+    int rem = n % world_size; // remainder if n isnt divisible 
 
-
-    int target = 3;
 
     //step 2: split points
     int *split_points = NULL;
     //rank 0 processes the split points for B
     if(world_rank == 0)
     {
+
         //creating the split points array, of size processors + 1
         split_points = (int *)malloc((world_size + 1) * sizeof(int));
         //first split point at 0
         split_points[0] = 0; 
-
+        
+        int base = n / world_size;
+        int current = 0;
         //find all split points based on A partition
         for (int i = 0; i < world_size; i++)
         {
-            int a_lastIndex = (i + 1) * (n / world_size) - 1; //last index of the current segment in A for process i
-            if (a_lastIndex >= n) a_lastIndex = n - 1; //if the last index is greater than the size of array, assign it to n-1
-            int a_end = A[a_lastIndex];
-
-
-            //finds the first index in B where the element is >= a_end. 
-            //this becomes the split point for B for process i + 1
-            split_points[i + 1] = binary_search(B, n, a_end);
+            int size_A = base + (i < rem ? 1 : 0);
+            int a_last = current + size_A - 1;
+            current += size_A;
+            split_points[i + 1] = binary_search(B, n, A[a_last]);
         }
+        split_points[world_size] = n;
     }
     //broadcast split points to all processes
     else if (world_rank != 0)
@@ -86,9 +121,11 @@ int main(int argc, char *argv[])
 
     //step 3: local partitioning
     //define a and b starting index, and its size
-    int a_start = world_rank * (n / world_size);
-    int size_A = (world_rank + 1) * (n / world_size) - a_start;
-
+   // int a_start = world_rank * (n / world_size);
+    //int size_A = (world_rank + 1) * (n / world_size) - a_start;
+    int a_start = world_rank * base + (world_rank < rem ? world_rank : rem); //calculating corrent partitioning if theres a remainder
+    int size_A = base + (world_rank < rem ? 1 : 0); //calculating corrent partitioning if theres a remainder
+    
     int b_start = split_points[world_rank];
     int size_B = split_points[world_rank + 1] - b_start;
 
@@ -110,6 +147,7 @@ int main(int argc, char *argv[])
         recv_counts = (int *)malloc(world_size * sizeof(int));
         displs = (int *)malloc(world_size * sizeof(int));
     }
+
     MPI_Gather(&size_C, 1, MPI_INT, recv_counts, 1, MPI_INT, 0, MPI_COMM_WORLD);
     
     if (world_rank == 0) 
@@ -152,7 +190,7 @@ int binary_search(int array[], int size, int target)
     {
         int middle = left + (right - left) / 2; 
 
-        if (array[middle] < target) left = middle + 1;
+        if (array[middle] <= target) left = middle + 1;
 
         else right = middle;
     }
